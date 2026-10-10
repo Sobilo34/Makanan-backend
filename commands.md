@@ -6,22 +6,25 @@ Quick reference cheat sheet for starting, managing, and debugging the **Makanan*
 
 ## 1. Docker Backend & Services (Recommended)
 
-All backend components (FastAPI, PostgreSQL 16, Redis 7) run containerized via Docker Compose.
+All backend components (FastAPI, PostgreSQL 16, Redis 7) run containerized in the sibling repository:
+`../Makanan-backend` (or `/home/bilal/bilal_projects/Makanan-backend`).
 
 ### Start Services
 ```bash
+# Navigate to the backend repository
+cd /home/bilal/bilal_projects/Makanan-backend
+
 # Start all services (Backend + Postgres + Redis) in the background
 docker compose up -d
 
-# Start and view live logs directly in your terminal
-docker compose up
-
-# Start only the database and Redis cache
-docker compose up -d db redis
+# Check running status and health
+docker compose ps
 ```
 
 ### Stop Services
 ```bash
+cd /home/bilal/bilal_projects/Makanan-backend
+
 # Stop all services (preserves database data in docker volumes)
 docker compose down
 
