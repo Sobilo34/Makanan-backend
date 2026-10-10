@@ -1,5 +1,6 @@
 import uuid
 from typing import Optional, List
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -147,3 +148,30 @@ async def cancel_subscription(
         "success": True,
         "credits_refunded": credits_remaining,
     }
+
+
+class UpdateStudentProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    student_id: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+@router.put("/profile")
+async def update_profile(
+    req: UpdateStudentProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if req.full_name is not None:
+        current_user.full_name = req.full_name.strip()
+    if req.phone is not None:
+        current_user.phone = req.phone.strip()
+    if req.student_id is not None:
+        current_user.student_id = req.student_id.strip()
+    if req.avatar_url is not None:
+        current_user.avatar_url = req.avatar_url.strip()
+
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user

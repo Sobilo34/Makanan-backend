@@ -10,6 +10,9 @@ from app.api.v1 import (
     students,
     partners,
     admin,
+    support,
+    notifications,
+    waitlist,
 )
 
 app = FastAPI(
@@ -38,6 +41,9 @@ app.include_router(redemptions.router, prefix=api_v1_prefix)
 app.include_router(students.router, prefix=api_v1_prefix)
 app.include_router(partners.router, prefix=api_v1_prefix)
 app.include_router(admin.router, prefix=api_v1_prefix)
+app.include_router(support.router, prefix=api_v1_prefix)
+app.include_router(notifications.router, prefix=api_v1_prefix)
+app.include_router(waitlist.router, prefix=api_v1_prefix)
 
 
 @app.get("/api/v1/health", status_code=status.HTTP_200_OK)
