@@ -1,5 +1,6 @@
 import uuid
 from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -84,6 +85,36 @@ async def partner_apply(req: PartnerApplyRequest, db: AsyncSession = Depends(get
 async def get_my_partner_profile(
     current_partner: Partner = Depends(get_current_partner),
 ):
+    return current_partner
+
+
+class UpdatePartnerProfileRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    price_per_meal: Optional[float] = None
+
+
+@router.put("/me", response_model=PartnerOut)
+async def update_my_partner_profile(
+    req: UpdatePartnerProfileRequest,
+    current_partner: Partner = Depends(get_current_partner),
+    db: AsyncSession = Depends(get_db),
+):
+    if req.name is not None:
+        current_partner.name = req.name.strip()
+    if req.phone is not None:
+        current_partner.phone = req.phone.strip()
+    if req.location is not None:
+        current_partner.location = req.location.strip()
+    if req.description is not None:
+        current_partner.description = req.description.strip()
+    if req.price_per_meal is not None and req.price_per_meal > 0:
+        current_partner.price_per_meal = req.price_per_meal
+
+    await db.commit()
+    await db.refresh(current_partner)
     return current_partner
 
 

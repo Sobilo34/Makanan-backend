@@ -35,52 +35,49 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
 
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Decodes and cryptographically verifies an access token using HMAC-SHA256.
+    Rejects expired, malformed, or untrusted tokens.
+    """
     if not token or str(token).strip().lower() in ["undefined", "null", "none", ""]:
         return None
 
-    # 1. Native FastAPI JWT
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["exp", "sub"]},
+        )
         return payload
     except jwt.PyJWTError:
-        pass
-
-    # 2. Supabase JWT fallback (allows transparent transition from Supabase auth session)
-    try:
-        unverified = jwt.decode(token, options={"verify_signature": False})
-        exp = unverified.get("exp")
-        now_ts = datetime.now(timezone.utc).timestamp()
-        
-        # Allow 30-day grace period for Supabase session transition
-        if exp and (now_ts - exp) > (30 * 86400):
-            return None  # truly expired beyond session window
-
-        if unverified.get("sub"):
-            user_meta = unverified.get("user_metadata") or {}
-            app_meta = unverified.get("app_metadata") or {}
-            role = user_meta.get("role") or app_meta.get("role") or unverified.get("role") or "student"
-            full_name = user_meta.get("full_name") or user_meta.get("fullName") or unverified.get("email", "").split("@")[0]
-            return {
-                "sub": unverified.get("sub"),
-                "email": unverified.get("email"),
-                "role": role,
-                "full_name": full_name,
-                "is_supabase": True,
-            }
-    except Exception as e:
-        print(f"[SECURITY] JWT decode error: {e}")
-        pass
-
-    return None
+        return None
 
 
 # ── HMAC-SHA256 Cryptographic Dynamic QR Token ────────────────────────────────
 def base64url_encode(data: bytes) -> str:
+    """
+    Encode bytes to base64url without padding.
+
+    >>> base64url_encode(b"hello world")
+    'aGVsbG8gd29ybGQ'
+    >>> base64url_encode(b"test1234")
+    'dGVzdDEyMzQ'
+    """
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
 
 def base64url_decode(data: str) -> bytes:
-    padding = "=" * (4 - (len(data) % 4))
+    """
+    Decode base64url string with automatic padding calculation.
+
+    >>> base64url_decode('aGVsbG8gd29ybGQ')
+    b'hello world'
+    >>> base64url_decode('dGVzdDEyMzQ')
+    b'test1234'
+    """
+    remainder = len(data) % 4
+    padding = "=" * (4 - remainder) if remainder != 0 else ""
     return base64.urlsafe_b64decode(data + padding)
 
 
@@ -91,6 +88,13 @@ def generate_qr_token(
     partner_id: Optional[str] = None,
     expiry_seconds: int = 300,
 ) -> str:
+    """
+    Generates an HMAC-SHA256 signed dynamic QR token with an expiry window.
+
+    >>> token = generate_qr_token("rid-1", "uid-1", "mid-1", "pid-1", 300)
+    >>> isinstance(token, str) and "." in token
+    True
+    """
     payload = {
         "rid": redemption_id,
         "uid": user_id,
@@ -112,6 +116,21 @@ def generate_qr_token(
 
 
 def verify_qr_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Verifies the HMAC-SHA256 signature and expiry timestamp of a dynamic QR token.
+    Uses constant-time comparison to prevent timing attacks.
+
+    >>> token = generate_qr_token("rid-1", "uid-1", "mid-1", "pid-1", 300)
+    >>> res = verify_qr_token(token)
+    >>> res["rid"] == "rid-1" and res["uid"] == "uid-1"
+    True
+    >>> verify_qr_token("tampered.signature") is None
+    True
+    >>> verify_qr_token("") is None
+    True
+    """
+    if not token or "." not in token:
+        return None
     try:
         parts = token.split(".")
         if len(parts) != 2:

@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func, update
 from sqlalchemy.orm import selectinload
@@ -16,6 +17,7 @@ from app.models import (
     Redemption,
     Payment,
     Settlement,
+    WaitlistSignup,
 )
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(require_role(["admin"]))])
@@ -187,18 +189,173 @@ async def list_settlements(db: AsyncSession = Depends(get_db)):
     ]
 
 
+class MarkSettlementPaidRequest(BaseModel):
+    reference: Optional[str] = "BANK-TRF-COMPLETED"
+
+
 @router.post("/settlements/{settlement_id}/mark-paid")
 async def mark_settlement_paid(
     settlement_id: uuid.UUID,
-    reference: Optional[str] = "BANK-TRF-COMPLETED",
+    req: Optional[MarkSettlementPaidRequest] = None,
     db: AsyncSession = Depends(get_db),
 ):
     now = datetime.now(timezone.utc)
+    ref = (req.reference if req and req.reference else None) or "BANK-TRF-COMPLETED"
     stmt = (
         update(Settlement)
         .where(Settlement.id == settlement_id)
-        .values(status="paid", paid_at=now, payment_reference=reference, updated_at=now)
+        .values(status="paid", paid_at=now, payment_reference=ref, updated_at=now)
     )
     res = await db.execute(stmt)
     await db.commit()
     return {"success": True}
+
+
+@router.get("/redemptions")
+async def list_all_redemptions(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = (
+        select(Redemption)
+        .options(
+            selectinload(Redemption.user),
+            selectinload(Redemption.meal),
+            selectinload(Redemption.partner),
+            selectinload(Redemption.subscription).selectinload(Subscription.meal_plan),
+        )
+        .order_by(Redemption.created_at.desc())
+        .limit(limit)
+    )
+    res = await db.execute(stmt)
+    redemptions = res.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "status": r.status,
+            "qr_code": r.qr_code,
+            "redeemed_at": r.redeemed_at or r.created_at,
+            "created_at": r.created_at,
+            "student_name": r.user.full_name if r.user else "Student",
+            "meal_name": r.meal.name if r.meal else "Meal",
+            "partner_name": r.partner.name if r.partner else "Partner",
+            "plan_name": r.subscription.meal_plan.name if (r.subscription and r.subscription.meal_plan) else "Standard",
+        }
+        for r in redemptions
+    ]
+
+
+class CreateMealPlanRequest(BaseModel):
+    name: str
+    tier: str
+    price_myr: float
+    credits: int
+    description: Optional[str] = None
+    is_active: bool = True
+
+
+@router.post("/meal-plans")
+async def create_meal_plan(
+    req: CreateMealPlanRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    plan = MealPlan(
+        name=req.name,
+        tier=req.tier,
+        price_myr=req.price_myr,
+        credits=req.credits,
+        description=req.description,
+        is_active=req.is_active,
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+class UpdateMealPlanRequest(BaseModel):
+    name: Optional[str] = None
+    tier: Optional[str] = None
+    price_myr: Optional[float] = None
+    credits: Optional[int] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.put("/meal-plans/{plan_id}")
+async def update_meal_plan(
+    plan_id: uuid.UUID,
+    req: UpdateMealPlanRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(MealPlan).where(MealPlan.id == plan_id)
+    res = await db.execute(stmt)
+    plan = res.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Meal plan not found")
+
+    if req.name is not None:
+        plan.name = req.name
+    if req.tier is not None:
+        plan.tier = req.tier
+    if req.price_myr is not None:
+        plan.price_myr = req.price_myr
+    if req.credits is not None:
+        plan.credits = req.credits
+    if req.description is not None:
+        plan.description = req.description
+    if req.is_active is not None:
+        plan.is_active = req.is_active
+
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
+class UpdatePartnerStatusRequest(BaseModel):
+    status: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.put("/partners/{partner_id}")
+async def update_partner_status(
+    partner_id: uuid.UUID,
+    req: UpdatePartnerStatusRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Partner).where(Partner.id == partner_id)
+    res = await db.execute(stmt)
+    partner = res.scalar_one_or_none()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+
+    if req.status is not None:
+        partner.status = req.status
+    if req.is_active is not None:
+        partner.is_active = req.is_active
+
+    await db.commit()
+    await db.refresh(partner)
+    return partner
+
+
+@router.get("/waitlist")
+async def list_admin_waitlist(db: AsyncSession = Depends(get_db)):
+    """Retrieve all waitlist signups for admin inspection."""
+    stmt = select(WaitlistSignup).order_by(WaitlistSignup.created_at.desc())
+    res = await db.execute(stmt)
+    entries = res.scalars().all()
+    return [
+        {
+            "id": str(e.id),
+            "email": e.email,
+            "full_name": e.full_name or "Student",
+            "university": "Albukhary International University",
+            "phone": None,
+            "source": "Landing Page",
+            "created_at": e.created_at.isoformat() if e.created_at else datetime.now(timezone.utc).isoformat(),
+        }
+        for e in entries
+    ]
+

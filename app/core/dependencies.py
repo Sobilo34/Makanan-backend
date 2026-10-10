@@ -48,31 +48,6 @@ async def get_current_user(
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
-    # 3. Auto-provision in PostgreSQL if user logged in via Supabase
-    if not user and payload.get("is_supabase") and payload.get("email"):
-        assigned_role = payload.get("role", "student")
-        if assigned_role not in ["student", "partner", "admin"]:
-            assigned_role = "student"
-
-        user = User(
-            id=user_uuid,
-            email=payload["email"].lower().strip(),
-            password_hash="supabase_auth_managed",
-            full_name=payload.get("full_name") or payload["email"].split("@")[0],
-            role=assigned_role,
-            is_active=True,
-        )
-        db.add(user)
-        try:
-            await db.commit()
-            await db.refresh(user)
-        except Exception:
-            await db.rollback()
-            # Race condition check: re-select
-            stmt = select(User).where(User.email == payload["email"].lower().strip())
-            res = await db.execute(stmt)
-            user = res.scalar_one_or_none()
-
     if not user:
         raise credentials_exception
 

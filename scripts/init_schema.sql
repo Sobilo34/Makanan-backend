@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS waitlist_signup (
 
 -- Seed Meal Plans
 INSERT INTO meal_plans (id, name, tier, price_myr, credits, description) VALUES
-  ('a1111111-1111-1111-1111-111111111111', 'Lite Saver', 'value', 120.00, 20, 'Perfect for light eaters — 20 meals per month at RM6.00/meal'),
+  ('a1111111-1111-1111-1111-111111111111', 'Lite Saver', 'value', 150.00, 20, 'Perfect for light eaters — 20 meals per month at RM7.50/meal'),
   ('a2222222-2222-2222-2222-222222222222', 'Value Regular', 'value', 250.00, 60, 'Affordable daily meals — 60 meals per month at RM4.17/meal'),
   ('a3333333-3333-3333-3333-333333333333', 'Value Flex', 'value', 250.00, 40, 'Affordable meals with flexibility — 40 meals per month at RM6.25/meal'),
   ('a4444444-4444-4444-4444-444444444444', 'Standard Regular', 'standard', 300.00, 60, 'Balanced quality and frequency — 60 meals per month at RM5.00/meal'),

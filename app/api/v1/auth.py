@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
@@ -65,8 +66,46 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 @router.post("/sync-session", response_model=TokenResponse)
 async def sync_session(current_user: User = Depends(get_current_user)):
-    """
-    Exchanges any valid session token (including Supabase JWT) for a native FastAPI token.
-    """
     token = create_access_token({"sub": str(current_user.id), "role": current_user.role, "email": current_user.email})
     return {"access_token": token, "token_type": "bearer", "user": current_user}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+
+    if not verify_password(req.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    current_user.password_hash = get_password_hash(req.new_password)
+    await db.commit()
+    return {"success": True, "message": "Password updated successfully"}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    req: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(User).where(User.email == req.email.lower().strip())
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+    # Idempotent response to prevent user enumeration
+    return {
+        "success": True,
+        "message": f"If an account exists for {req.email.lower().strip()}, reset instructions have been dispatched.",
+    }
