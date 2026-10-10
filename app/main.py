@@ -1,9 +1,11 @@
 import time
 import uuid
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.database import init_db
 from app.api.v1 import (
     auth,
     plans,
@@ -25,18 +27,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("makanan")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: auto-create tables & seed initial meal plans
+    await init_db()
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-# CORS Middleware (Restricted to configured origins and local dev ports)
+# CORS Middleware (Restricted to configured origins, local dev ports, and production cloud previews)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"^https?://.*(localhost|127\.0\.0\.1|vercel\.app|onrender\.com|makanan\.app)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -66,6 +77,42 @@ async def security_and_tracing_middleware(request: Request, call_next):
     )
 
     return response
+
+
+# Root discovery endpoint
+@app.get("/", status_code=status.HTTP_200_OK)
+async def root():
+    return {
+        "status": "online",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "api_v1": "/api/v1",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }
+
+
+# API v1 Index endpoint
+@app.get("/api/v1", status_code=status.HTTP_200_OK)
+@app.get("/api/v1/", status_code=status.HTTP_200_OK)
+async def api_v1_root():
+    return {
+        "status": "online",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "endpoints": {
+            "health": "/api/v1/health",
+            "docs": "/docs",
+            "plans": "/api/v1/plans",
+            "meals": "/api/v1/meals",
+            "auth": "/api/v1/auth",
+            "payments": "/api/v1/payments",
+            "students": "/api/v1/students",
+            "partners": "/api/v1/partners",
+            "admin": "/api/v1/admin",
+        },
+    }
+
 
 # Mount API v1 Routers
 api_v1_prefix = settings.API_V1_PREFIX
