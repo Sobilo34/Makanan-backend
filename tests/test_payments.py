@@ -13,7 +13,7 @@ async def test_create_order_malaysian_payment_methods(client, student_auth_heade
     plan = plan_res.scalar_one_or_none()
     assert plan is not None, "Need active meal plan"
 
-    methods = ["duitnow_qr", "tng_ewallet", "shopeepay", "grabpay"]
+    methods = ["duitnow_qr", "tng_ewallet"]
     for method in methods:
         res = await client.post(
             "/api/v1/payments/create-order",
@@ -26,6 +26,16 @@ async def test_create_order_malaysian_payment_methods(client, student_auth_heade
         assert data["payment_method"] == method
         assert data["amount_myr"] == float(plan.price_myr)
         assert "payment_id" in data
+
+    # Verify that unsupported methods are strictly rejected
+    for invalid_method in ["grabpay", "shopeepay", "card"]:
+        bad_res = await client.post(
+            "/api/v1/payments/create-order",
+            headers=student_auth_headers,
+            json={"plan_id": str(plan.id), "payment_method": invalid_method},
+        )
+        assert bad_res.status_code == 400
+        assert "supported for launch" in bad_res.json()["detail"]
 
 
 @pytest.mark.asyncio

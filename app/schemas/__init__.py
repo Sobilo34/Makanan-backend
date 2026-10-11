@@ -157,7 +157,7 @@ class SubscriptionOut(BaseModel):
 # ── Malaysian Payments (DuitNow QR & E-Wallets) ──────────────────────────────
 class CreatePaymentOrderRequest(BaseModel):
     plan_id: uuid.UUID
-    payment_method: str = "duitnow_qr"  # duitnow_qr, tng_ewallet, grabpay, shopeepay
+    payment_method: str = "duitnow_qr"  # Supported for launch: 'duitnow_qr', 'tng_ewallet'
 
 
 class PaymentOrderOut(BaseModel):

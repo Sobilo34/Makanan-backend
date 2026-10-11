@@ -22,8 +22,14 @@ async def create_payment_order(
 ):
     """
     Creates an authoritative HitPay Malaysia payment request.
-    Returns HitPay checkout URL, DuitNow QR, and deep links.
+    Strictly restricted to launch options: 'duitnow_qr' (DuitNow QR) and 'tng_ewallet' (Touch 'n Go eWallet).
     """
+    if req.payment_method not in ["duitnow_qr", "tng_ewallet"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only 'duitnow_qr' (DuitNow QR) and 'tng_ewallet' (Touch 'n Go eWallet) are supported for launch.",
+        )
+
     result = await PaymentService.create_payment_order(
         db=db,
         user_id=current_user.id,
