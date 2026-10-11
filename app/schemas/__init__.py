@@ -170,8 +170,11 @@ class PaymentOrderOut(BaseModel):
     qr_data: str
     qr_image_url: Optional[str] = None
     deep_link_url: Optional[str] = None
+    checkout_url: Optional[str] = None
+    hitpay_request_id: Optional[str] = None
     expires_at: datetime
     instructions: str
+
 
 
 class PaymentStatusOut(BaseModel):

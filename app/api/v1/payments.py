@@ -1,10 +1,15 @@
+import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.config import settings
 from app.models import User
 from app.schemas import CreatePaymentOrderRequest, PaymentOrderOut, PaymentStatusOut
-from app.services.payment_service import PaymentService
+from app.services.payment_service import PaymentService, verify_hitpay_signature
+
+logger = logging.getLogger("makanan.payments.api")
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
@@ -16,8 +21,8 @@ async def create_payment_order(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Creates an authoritative payment order and returns a DuitNow QR or e-wallet intent.
-    Price and credits are looked up directly from the database to prevent tampering.
+    Creates an authoritative HitPay Malaysia payment request.
+    Returns HitPay checkout URL, DuitNow QR, and deep links.
     """
     result = await PaymentService.create_payment_order(
         db=db,
@@ -33,7 +38,10 @@ async def get_payment_status(
     reference_code: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Pollable endpoint for the frontend to detect when payment has cleared."""
+    """
+    Pollable endpoint for frontend.
+    Synchronously verifies live status against HitPay Malaysia API if pending.
+    """
     return await PaymentService.get_payment_status(db=db, reference_code=reference_code)
 
 
@@ -54,26 +62,69 @@ async def simulate_payment_success(
     return result
 
 
+@router.post("/hitpay-webhook")
 @router.post("/webhook")
-async def payment_gateway_webhook(
+async def hitpay_payment_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Server-to-server webhook callback from payment gateway (Curlec, Revenue Monster, PayNet).
+    Server-to-server webhook callback from HitPay Malaysia.
+    Validates HMAC-SHA256 signature with HitPay Salt.
     """
-    payload = await request.json()
-    reference_code = payload.get("reference_code") or payload.get("order_id")
+    raw_body = await request.body()
+    signature = (
+        request.headers.get("Hitpay-Signature")
+        or request.headers.get("hitpay-signature")
+        or request.headers.get("X-Hitpay-Signature")
+    )
+
+    # 1. Parse JSON or Form payload
+    payload = {}
+    if raw_body:
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except Exception:
+            try:
+                form = await request.form()
+                payload = dict(form)
+            except Exception:
+                payload = {}
+
+    # 2. Cryptographic HMAC validation if salt & signature are provided
+    if settings.HITPAY_SALT and signature:
+        if not verify_hitpay_signature(raw_body, signature, settings.HITPAY_SALT):
+            logger.warning("HitPay webhook signature mismatch! Rejected.")
+            raise HTTPException(status_code=400, detail="Invalid Hitpay-Signature HMAC")
+
+    reference_code = (
+        payload.get("reference_number")
+        or payload.get("reference")
+        or payload.get("reference_code")
+        or payload.get("order_id")
+    )
     gateway_status = payload.get("status")
+    payment_id = payload.get("payment_id") or payload.get("id")
 
     if not reference_code:
-        raise HTTPException(status_code=400, detail="Missing order reference")
+        # Check nested payment_request object if present
+        pr = payload.get("payment_request") or payload.get("order")
+        if isinstance(pr, dict):
+            reference_code = pr.get("reference_number") or pr.get("reference")
+            gateway_status = gateway_status or pr.get("status")
 
-    if gateway_status in ["paid", "completed", "SUCCESS", "00"]:
+    if not reference_code:
+        logger.warning(f"HitPay webhook missing reference_number. Payload: {payload}")
+        return {"received": True, "processed": False, "reason": "Missing reference"}
+
+    if gateway_status in ["completed", "succeeded", "paid", "SUCCESS", "00"]:
+        logger.info(f"HitPay webhook confirmed payment for order {reference_code} (Status: {gateway_status})")
         await PaymentService.process_successful_payment(
             db=db,
             reference_code=reference_code,
-            gateway_txn_id=payload.get("transaction_id"),
+            gateway_txn_id=payment_id,
         )
+        return {"received": True, "processed": True}
 
-    return {"received": True}
+    logger.info(f"HitPay webhook received order {reference_code} with status: {gateway_status}")
+    return {"received": True, "processed": False, "status": gateway_status}

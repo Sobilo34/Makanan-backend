@@ -22,13 +22,28 @@ class Settings(BaseSettings):
     QR_SECRET: str = "02a7c8f733a3e3d8da867d64ca8b9e880a16bf88f9985bf4c5f5f2dce89fe0fe"
     QR_EXPIRE_SECONDS: int = 300  # 5 minutes dynamic window
 
-    # Malaysian Payments
+    # HitPay Malaysia Payment Gateway Settings
     PAYMENT_MODE: str = "sandbox"  # "sandbox" or "live"
+    HITPAY_API_KEY: str = "test_d0dc1f3a28130b7d5a106992816967aa5f78f80a29c8f2c9f8e1fbd31b24312b"
+    HITPAY_SALT: str = "KovcyQfmICrRoIeWKxlLOv5RwHiBrInyt4MCKCtM44a3aWk5S1yPh0H0jGj9i5Z4"
+    HITPAY_SANDBOX: bool = True
+    HITPAY_BASE_URL: str = "https://api.sandbox.hit-pay.com"
+    HITPAY_REDIRECT_URL: str = "http://localhost:4028/dashboard/payment-success"
+    HITPAY_WEBHOOK_URL: str = ""
+
+    # Legacy Merchant Fallbacks
     DUITNOW_MERCHANT_ID: str = "MKN-PAYNET-AIU01"
     DUITNOW_MERCHANT_NAME: str = "Makanan AIU"
     TNG_MERCHANT_ID: str = "TNG-MKN-AIU-001"
     GRABPAY_MERCHANT_ID: str = "GRAB-MKN-AIU-001"
     SHOPEEPAY_MERCHANT_ID: str = "SHOPEE-MKN-AIU-001"
+
+    @property
+    def hitpay_endpoint(self) -> str:
+        if self.HITPAY_SANDBOX or self.PAYMENT_MODE == "sandbox":
+            return "https://api.sandbox.hit-pay.com"
+        return "https://api.hit-pay.com"
+
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:4028,http://127.0.0.1:3000,http://127.0.0.1:4028"
