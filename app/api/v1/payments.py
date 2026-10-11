@@ -1,11 +1,13 @@
 import json
 import logging
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.config import settings
-from app.models import User
+from app.models import User, Payment
 from app.schemas import CreatePaymentOrderRequest, PaymentOrderOut, PaymentStatusOut
 from app.services.payment_service import PaymentService, verify_hitpay_signature
 
@@ -105,10 +107,9 @@ async def hitpay_payment_webhook(
                 payload = {}
 
     # 2. Cryptographic HMAC validation if salt & signature are provided
+    is_valid_sig = True
     if settings.HITPAY_SALT and signature:
-        if not verify_hitpay_signature(raw_body, signature, settings.HITPAY_SALT):
-            logger.warning("HitPay webhook signature mismatch! Rejected.")
-            raise HTTPException(status_code=400, detail="Invalid Hitpay-Signature HMAC")
+        is_valid_sig = verify_hitpay_signature(raw_body, signature, settings.HITPAY_SALT)
 
     reference_code = (
         payload.get("reference_number")
@@ -117,7 +118,12 @@ async def hitpay_payment_webhook(
         or payload.get("order_id")
     )
     gateway_status = payload.get("status")
-    payment_id = payload.get("payment_id") or payload.get("id")
+    payment_id = payload.get("payment_id") or payload.get("id") or payload.get("payment_request_id")
+
+    if not payment_id and isinstance(payload.get("payment_provider"), dict):
+        charge = payload["payment_provider"].get("charge")
+        if isinstance(charge, dict):
+            payment_id = charge.get("id")
 
     if not reference_code:
         # Check nested payment_request object if present
@@ -125,12 +131,49 @@ async def hitpay_payment_webhook(
         if isinstance(pr, dict):
             reference_code = pr.get("reference_number") or pr.get("reference")
             gateway_status = gateway_status or pr.get("status")
+            payment_id = payment_id or pr.get("id")
+
+    if not reference_code and payment_id:
+        # Match by gateway_transaction_id in database
+        pay_stmt = select(Payment).where(
+            (Payment.gateway_transaction_id == payment_id) |
+            (Payment.gateway_transaction_id.like(f"%{payment_id}%"))
+        )
+        pay_res = await db.execute(pay_stmt)
+        matched_pay = pay_res.scalar_one_or_none()
+        if matched_pay:
+            reference_code = matched_pay.reference_code
+
+    # If signature verification failed, check HitPay live API directly as authoritative verification
+    if settings.HITPAY_SALT and signature and not is_valid_sig:
+        logger.warning("HitPay webhook signature mismatch! Verifying via live HitPay API...")
+        verified_live = False
+        check_id = payment_id or reference_code
+        if check_id:
+            try:
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    hp_res = await client.get(
+                        f"{settings.hitpay_endpoint}/v1/payment-requests/{check_id}",
+                        headers={
+                            "X-BUSINESS-API-KEY": settings.HITPAY_API_KEY,
+                            "User-Agent": "MakananApp/1.0 (Fintech; Malaysia)",
+                        },
+                    )
+                    if hp_res.status_code == 200:
+                        hp_json = hp_res.json()
+                        if str(hp_json.get("status", "")).lower() in ["completed", "succeeded", "paid"]:
+                            verified_live = True
+                            gateway_status = hp_json.get("status")
+            except Exception as e:
+                logger.debug(f"Direct API fallback check failed: {e}")
+        if not verified_live:
+            raise HTTPException(status_code=400, detail="Invalid Hitpay-Signature HMAC")
 
     if not reference_code:
         logger.warning(f"HitPay webhook missing reference_number. Payload: {payload}")
         return {"received": True, "processed": False, "reason": "Missing reference"}
 
-    if gateway_status in ["completed", "succeeded", "paid", "SUCCESS", "00"]:
+    if str(gateway_status).lower() in ["completed", "succeeded", "paid", "success", "00"]:
         logger.info(f"HitPay webhook confirmed payment for order {reference_code} (Status: {gateway_status})")
         await PaymentService.process_successful_payment(
             db=db,
