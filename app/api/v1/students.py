@@ -114,35 +114,47 @@ async def cancel_subscription(
     """
     Atomically cancels an active subscription and refunds remaining credits to the ledger.
     """
-    async with db.begin():
-        stmt = (
-            select(Subscription)
-            .where(
-                Subscription.id == req.subscription_id,
-                Subscription.user_id == current_user.id,
-                Subscription.status == "active",
-            )
-            .with_for_update()
+    stmt = (
+        select(Subscription)
+        .where(
+            Subscription.id == req.subscription_id,
+            Subscription.user_id == current_user.id,
+            Subscription.status == "active",
         )
-        res = await db.execute(stmt)
-        sub = res.scalar_one_or_none()
+        .with_for_update()
+    )
+    res = await db.execute(stmt)
+    sub = res.scalar_one_or_none()
 
-        if not sub:
-            raise HTTPException(status_code=404, detail="No active subscription found to cancel")
+    if not sub:
+        raise HTTPException(status_code=404, detail="No active subscription found to cancel")
 
-        credits_remaining = sub.credits_total - sub.credits_used
-        sub.status = "cancelled"
+    credits_remaining = max(0, sub.credits_total - sub.credits_used)
+    sub.status = "cancelled"
 
-        # Record refund in ledger
-        if credits_remaining > 0:
-            ledger = WalletTransaction(
-                user_id=current_user.id,
-                subscription_id=sub.id,
-                description=f"Subscription cancelled — {credits_remaining} meal credit(s) refunded",
-                credits_delta=credits_remaining,
-                balance_after=credits_remaining,
-            )
-            db.add(ledger)
+    # Fetch latest wallet balance to calculate new ledger running balance
+    last_tx_stmt = (
+        select(WalletTransaction.balance_after)
+        .where(WalletTransaction.user_id == current_user.id)
+        .order_by(WalletTransaction.created_at.desc())
+        .limit(1)
+    )
+    last_bal_res = await db.execute(last_tx_stmt)
+    current_balance = last_bal_res.scalar_one_or_none() or 0
+    new_balance = current_balance + credits_remaining
+
+    # Record refund in ledger
+    if credits_remaining > 0:
+        ledger = WalletTransaction(
+            user_id=current_user.id,
+            subscription_id=sub.id,
+            description=f"Subscription cancelled — {credits_remaining} meal credit(s) refunded",
+            credits_delta=credits_remaining,
+            balance_after=new_balance,
+        )
+        db.add(ledger)
+
+    await db.commit()
 
     return {
         "success": True,
