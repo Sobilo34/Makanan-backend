@@ -130,6 +130,7 @@ class PaymentService:
                     "X-BUSINESS-API-KEY": settings.HITPAY_API_KEY,
                     "Content-Type": "application/x-www-form-urlencoded",
                     "X-Requested-With": "XMLHttpRequest",
+                    "User-Agent": "MakananApp/1.0 (Fintech; Malaysia)",
                 }
                 hp_resp = await client.post(
                     f"{settings.hitpay_endpoint}/v1/payment-requests",
@@ -152,10 +153,10 @@ class PaymentService:
         # Set instructions and deep link
         if payment_method == "tng_ewallet":
             deep_link_url = checkout_url or f"tngewallet://pay?merchant={settings.TNG_MERCHANT_ID}&ref={reference_code}&amount={amount:.2f}"
-            instructions = "Pay with Touch 'n Go eWallet via HitPay secure checkout, or scan the DuitNow QR."
+            instructions = "Pay securely with Touch 'n Go eWallet via HitPay, or scan the QR code using your Touch 'n Go app."
         else:
             deep_link_url = checkout_url
-            instructions = "Scan with Touch 'n Go, MAE Maybank, CIMB, GrabPay, or tap 'Pay with HitPay'."
+            instructions = "Scan the QR code with any Malaysian banking app (MAE Maybank, CIMB, Bank Islam, etc.) or tap 'Pay via HitPay'."
 
         qr_image_data_url = generate_qr_data_url(qr_string)
 
@@ -311,7 +312,10 @@ class PaymentService:
                 async with httpx.AsyncClient(timeout=4.0) as client:
                     hp_res = await client.get(
                         f"{settings.hitpay_endpoint}/v1/payment-requests/{payment.gateway_transaction_id}",
-                        headers={"X-BUSINESS-API-KEY": settings.HITPAY_API_KEY},
+                        headers={
+                            "X-BUSINESS-API-KEY": settings.HITPAY_API_KEY,
+                            "User-Agent": "MakananApp/1.0 (Fintech; Malaysia)",
+                        },
                     )
                     if hp_res.status_code == 200:
                         hp_data = hp_res.json()

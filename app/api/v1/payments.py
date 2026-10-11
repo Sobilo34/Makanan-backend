@@ -51,23 +51,6 @@ async def get_payment_status(
     return await PaymentService.get_payment_status(db=db, reference_code=reference_code)
 
 
-@router.post("/simulate-success/{reference_code}")
-async def simulate_payment_success(
-    reference_code: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Simulates a Malaysian bank / e-wallet scanning the DuitNow QR code and remitting funds.
-    Enables instant end-to-end testing in sandbox/development mode.
-    """
-    result = await PaymentService.process_successful_payment(
-        db=db,
-        reference_code=reference_code,
-        gateway_txn_id=f"SIMULATED-SCAN-{reference_code}",
-    )
-    return result
-
-
 @router.post("/hitpay-webhook")
 @router.post("/webhook")
 async def hitpay_payment_webhook(
