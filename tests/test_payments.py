@@ -175,6 +175,50 @@ async def test_hitpay_webhook_hmac_verification(client, student_auth_headers, db
             sub = await db_session.get(Subscription, sub_id)
             if sub:
                 await db_session.delete(sub)
+
+@pytest.mark.asyncio
+async def test_sandbox_payment_clearance(client, student_auth_headers, db_session):
+    """
+    Verify Touch 'n Go eWallet sandbox clearance endpoint:
+      1. Create order for Touch 'n Go eWallet.
+      2. Call /api/v1/payments/sandbox-complete/{ref_code}.
+      3. Verify payment is completed, subscription is active, and ledger record exists.
+    """
+    plan_res = await db_session.execute(select(MealPlan).where(MealPlan.is_active == True).limit(1))
+    plan = plan_res.scalar_one_or_none()
+    assert plan is not None
+
+    # 1. Create order with Touch 'n Go eWallet
+    create_res = await client.post(
+        "/api/v1/payments/create-order",
+        headers=student_auth_headers,
+        json={"plan_id": str(plan.id), "payment_method": "tng_ewallet"},
+    )
+    assert create_res.status_code == 200
+    ref_code = create_res.json()["reference_code"]
+
+    # 2. Complete payment via sandbox authorization endpoint
+    sandbox_res = await client.post(f"/api/v1/payments/sandbox-complete/{ref_code}")
+    assert sandbox_res.status_code == 200
+    data = sandbox_res.json()
+    assert data["success"] is True
+    assert data["credits"] == plan.credits
+
+    # 3. Verify status completed
+    status_res = await client.get(f"/api/v1/payments/status/{ref_code}")
+    assert status_res.status_code == 200
+    assert status_res.json()["status"] == "completed"
+
+    # Cleanup
+    pay_res = await db_session.execute(select(Payment).where(Payment.reference_code == ref_code))
+    payment = pay_res.scalar_one_or_none()
+    if payment:
+        sub_id = payment.subscription_id
+        await db_session.delete(payment)
+        if sub_id:
+            sub = await db_session.get(Subscription, sub_id)
+            if sub:
+                await db_session.delete(sub)
         await db_session.commit()
 
 

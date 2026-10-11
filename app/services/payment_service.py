@@ -248,13 +248,23 @@ class PaymentService:
             await db.flush()  # assign ID
 
             # 5. Insert double-entry ledger record
+            last_tx_stmt = (
+                select(WalletTransaction.balance_after)
+                .where(WalletTransaction.user_id == payment.user_id)
+                .order_by(WalletTransaction.created_at.desc())
+                .limit(1)
+            )
+            last_bal_res = await db.execute(last_tx_stmt)
+            prev_balance = last_bal_res.scalar_one_or_none() or 0
+            new_balance = prev_balance + plan.credits
+
             ledger_entry = WalletTransaction(
                 user_id=payment.user_id,
                 subscription_id=new_sub.id,
                 payment_id=payment.id,
                 description=f"Meal plan purchased via HitPay ({payment.payment_method.replace('_', ' ').title()}) — {plan.credits} credits issued",
                 credits_delta=plan.credits,
-                balance_after=plan.credits,
+                balance_after=new_balance,
             )
             db.add(ledger_entry)
 

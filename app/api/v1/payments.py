@@ -51,6 +51,30 @@ async def get_payment_status(
     return await PaymentService.get_payment_status(db=db, reference_code=reference_code)
 
 
+@router.post("/sandbox-complete/{reference_code}")
+async def sandbox_complete_payment(
+    reference_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Authorizes and completes an active HitPay payment request in Sandbox / Test mode.
+    Enables realistic testing of Malaysian local payment methods (Touch 'n Go & DuitNow)
+    which HitPay sandbox does not clear natively. Strictly forbidden in production.
+    """
+    if settings.PAYMENT_MODE == "production" and not settings.HITPAY_SANDBOX:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sandbox payment authorization is disabled in production mode.",
+        )
+
+    result = await PaymentService.process_successful_payment(
+        db=db,
+        reference_code=reference_code,
+        gateway_txn_id=f"HITPAY-SANDBOX-AUTH-{reference_code}",
+    )
+    return result
+
+
 @router.post("/hitpay-webhook")
 @router.post("/webhook")
 async def hitpay_payment_webhook(
