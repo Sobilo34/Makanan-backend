@@ -109,8 +109,8 @@ async def hitpay_payment_webhook(
 
     # 2. Cryptographic HMAC validation if salt & signature are provided
     is_valid_sig = True
-    if settings.HITPAY_SALT and signature:
-        is_valid_sig = verify_hitpay_signature(raw_body, signature, settings.HITPAY_SALT)
+    if settings.clean_hitpay_salt and signature:
+        is_valid_sig = verify_hitpay_signature(raw_body, signature, settings.clean_hitpay_salt)
 
     reference_code = (
         payload.get("reference_number")

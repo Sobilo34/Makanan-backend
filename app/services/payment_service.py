@@ -112,11 +112,19 @@ class PaymentService:
             final_redirect_url = f"{final_redirect_url}{sep}reference_code={reference_code}"
 
         # 2. Call HitPay Malaysia API
+        email = "student@makanan.app"
+        if student and student.email and "@" in student.email:
+            email = student.email.strip()
+
+        name = "Student"
+        if student and student.full_name and student.full_name.strip():
+            name = student.full_name.strip()
+
         hitpay_payload: Dict[str, Any] = {
             "amount": f"{amount:.2f}",
             "currency": "MYR",
-            "email": student.email if student else "student@makanan.app",
-            "name": student.full_name if (student and student.full_name) else "Student",
+            "email": email,
+            "name": name,
             "purpose": f"{plan.name} ({plan.credits} Meal Credits)",
             "reference_number": reference_code,
             "redirect_url": final_redirect_url,
@@ -132,9 +140,9 @@ class PaymentService:
         # If no specific filter, HitPay enables all methods on merchant account (DuitNow, Touch 'n Go, etc.)
 
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 hp_headers = {
-                    "X-BUSINESS-API-KEY": settings.HITPAY_API_KEY,
+                    "X-BUSINESS-API-KEY": settings.clean_hitpay_api_key,
                     "Content-Type": "application/x-www-form-urlencoded",
                     "X-Requested-With": "XMLHttpRequest",
                     "User-Agent": "MakananApp/1.0 (Fintech; Malaysia)",
@@ -151,11 +159,25 @@ class PaymentService:
                     qr_string = checkout_url or format_emvco_duitnow_qr(reference_code, amount)
                     logger.info(f"HitPay payment request created: {hitpay_request_id} for order {reference_code}")
                 else:
-                    logger.warning(f"HitPay API returned {hp_resp.status_code}: {hp_resp.text}")
-                    qr_string = format_emvco_duitnow_qr(reference_code, amount)
+                    err_msg = hp_resp.text
+                    try:
+                        err_data = hp_resp.json()
+                        err_msg = err_data.get("message") or err_data.get("error") or str(err_data)
+                    except Exception:
+                        pass
+                    logger.error(f"HitPay API returned {hp_resp.status_code}: {err_msg}")
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"HitPay Gateway ({hp_resp.status_code}): {err_msg}",
+                    )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.warning(f"HitPay request encountered error (falling back to direct QR): {e}")
-            qr_string = format_emvco_duitnow_qr(reference_code, amount)
+            logger.error(f"HitPay request encountered error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"HitPay Connection Error: {str(e)}",
+            )
 
         # Set instructions and deep link
         if payment_method == "tng_ewallet":
@@ -326,11 +348,11 @@ class PaymentService:
         # Real-time HitPay API synchronization if currently pending
         if payment.status == "pending" and payment.gateway_transaction_id and not payment.gateway_transaction_id.startswith("HITPAY-PENDING-"):
             try:
-                async with httpx.AsyncClient(timeout=4.0) as client:
+                async with httpx.AsyncClient(timeout=6.0) as client:
                     hp_res = await client.get(
                         f"{settings.hitpay_endpoint}/v1/payment-requests/{payment.gateway_transaction_id}",
                         headers={
-                            "X-BUSINESS-API-KEY": settings.HITPAY_API_KEY,
+                            "X-BUSINESS-API-KEY": settings.clean_hitpay_api_key,
                             "User-Agent": "MakananApp/1.0 (Fintech; Malaysia)",
                         },
                     )

@@ -39,14 +39,33 @@ class Settings(BaseSettings):
     SHOPEEPAY_MERCHANT_ID: str = "SHOPEE-MKN-AIU-001"
 
     @property
+    def clean_hitpay_api_key(self) -> str:
+        key = (self.HITPAY_API_KEY or "").strip().strip('"').strip("'")
+        if not key or key == "your-hitpay-api-key":
+            return "test_d0dc1f3a28130b7d5a106992816967aa5f78f80a29c8f2c9f8e1fbd31b24312b"
+        return key
+
+    @property
+    def clean_hitpay_salt(self) -> str:
+        salt = (self.HITPAY_SALT or "").strip().strip('"').strip("'")
+        if not salt or salt == "your-hitpay-salt":
+            return "KovcyQfmICrRoIeWKxlLOv5RwHiBrInyt4MCKCtM44a3aWk5S1yPh0H0jGj9i5Z4"
+        return salt
+
+    @property
     def hitpay_endpoint(self) -> str:
-        if self.HITPAY_SANDBOX or self.PAYMENT_MODE == "sandbox":
+        # If API key starts with test_, it must always target the Sandbox endpoint
+        if (
+            self.clean_hitpay_api_key.startswith("test_")
+            or self.HITPAY_SANDBOX
+            or self.PAYMENT_MODE == "sandbox"
+        ):
             return "https://api.sandbox.hit-pay.com"
         return "https://api.hit-pay.com"
 
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:4028,http://127.0.0.1:3000,http://127.0.0.1:4028"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:4028,http://127.0.0.1:3000,http://127.0.0.1:4028,https://makanan.pxxlspace.cv"
 
     @property
     def cors_origin_list(self) -> List[str]:
