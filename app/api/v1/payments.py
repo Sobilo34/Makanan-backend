@@ -37,6 +37,7 @@ async def create_payment_order(
         user_id=current_user.id,
         plan_id=req.plan_id,
         payment_method=req.payment_method,
+        redirect_url=req.redirect_url,
     )
     return result
 

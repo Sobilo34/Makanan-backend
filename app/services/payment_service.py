@@ -73,6 +73,7 @@ class PaymentService:
         user_id: uuid.UUID,
         plan_id: uuid.UUID,
         payment_method: str = "duitnow_qr",
+        redirect_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Creates an authoritative payment request via HitPay Malaysia.
@@ -104,6 +105,12 @@ class PaymentService:
         qr_string: str = ""
         deep_link_url: Optional[str] = None
 
+        # Build dynamic redirect URL ensuring reference_code parameter
+        final_redirect_url = redirect_url or f"{settings.HITPAY_REDIRECT_URL}?reference_code={reference_code}"
+        if "reference_code=" not in final_redirect_url:
+            sep = "&" if "?" in final_redirect_url else "?"
+            final_redirect_url = f"{final_redirect_url}{sep}reference_code={reference_code}"
+
         # 2. Call HitPay Malaysia API
         hitpay_payload: Dict[str, Any] = {
             "amount": f"{amount:.2f}",
@@ -112,10 +119,10 @@ class PaymentService:
             "name": student.full_name if (student and student.full_name) else "Student",
             "purpose": f"{plan.name} ({plan.credits} Meal Credits)",
             "reference_number": reference_code,
-            "redirect_url": f"{settings.HITPAY_REDIRECT_URL}?reference_code={reference_code}",
+            "redirect_url": final_redirect_url,
         }
-        if settings.HITPAY_WEBHOOK_URL:
-            hitpay_payload["webhook"] = settings.HITPAY_WEBHOOK_URL
+        webhook_target = settings.HITPAY_WEBHOOK_URL or "https://makanan-backend.onrender.com/api/v1/payments/hitpay-webhook"
+        hitpay_payload["webhook"] = webhook_target
 
         # Map payment methods to HitPay Malaysia enums
         if payment_method == "tng_ewallet":
@@ -339,10 +346,19 @@ class PaymentService:
             except Exception as e:
                 logger.debug(f"Live HitPay status check skipped: {e}")
 
+        plan = None
+        if payment.meal_plan_id:
+            plan_stmt = select(MealPlan).where(MealPlan.id == payment.meal_plan_id)
+            plan_res = await db.execute(plan_stmt)
+            plan = plan_res.scalar_one_or_none()
+
         return {
             "reference_code": payment.reference_code,
             "status": payment.status,
             "amount_myr": float(payment.amount_myr),
             "paid_at": payment.paid_at,
             "subscription_id": payment.subscription_id,
+            "credits": plan.credits if plan else 0,
+            "plan_name": plan.name if plan else "Meal Plan",
+            "payment_method": payment.payment_method,
         }

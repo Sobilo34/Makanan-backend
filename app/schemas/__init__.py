@@ -158,6 +158,7 @@ class SubscriptionOut(BaseModel):
 class CreatePaymentOrderRequest(BaseModel):
     plan_id: uuid.UUID
     payment_method: str = "duitnow_qr"  # Supported for launch: 'duitnow_qr', 'tng_ewallet'
+    redirect_url: Optional[str] = None
 
 
 class PaymentOrderOut(BaseModel):
@@ -183,6 +184,9 @@ class PaymentStatusOut(BaseModel):
     amount_myr: float
     paid_at: Optional[datetime] = None
     subscription_id: Optional[uuid.UUID] = None
+    credits: Optional[int] = None
+    plan_name: Optional[str] = None
+    payment_method: Optional[str] = None
 
 
 # ── Redemptions ──────────────────────────────────────────────────────────────
